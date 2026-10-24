@@ -536,48 +536,71 @@ Note on idempotency: `DELETE` is idempotent in HTTP terms because the *state* af
 
 ```mermaid
 flowchart TB
-    Client["Client<br/>(curl / Postman)"]
+    Client(["Client<br/>curl / Postman"])
 
     subgraph AWS["AWS"]
-        GW["API Gateway<br/>stage: Alpha_dev"]
-        LA["Architecture A<br/>4 Lambdas, one per operation<br/>create · get · find · delete"]
-        LB["Architecture B<br/>1 Lambda: orders-api-proxy"]
+        direction TB
+        GW["API Gateway (REST API)<br/>stage: Alpha_dev"]
+        subgraph A["Architecture A: non-proxy"]
+            LA["λ orders-create-order<br/>λ orders-get-order<br/>λ orders-find-orders<br/>λ orders-delete-order"]
+        end
+        subgraph B["Architecture B: proxy"]
+            LB["λ orders-api-proxy"]
+        end
+        CW[("CloudWatch Logs")]
     end
 
-    subgraph JAVA["Our Java code (orders-api-1.0.0.jar)"]
-        D["DirectOrderFunctions<br/>entry points for A"]
-        H["OrdersApiHandler<br/>HTTP adapter for B"]
-        S["OrderService<br/>business logic"]
-        R["InMemoryOrderRepository<br/>orders kept in memory"]
+    subgraph JAR["orders-api-1.0.0.jar (the same JAR in every Lambda)"]
+        direction TB
+        subgraph AWSJAVA["Java that uses AWS libraries"]
+            H["OrdersApiHandler<br/>reads the request and builds<br/>the HTTP response (status, headers, JSON)"]
+        end
+        subgraph PLAIN["Plain Java (no AWS, no HTTP)"]
+            D["DirectOrderFunctions<br/>one method per Lambda"]
+            S["OrderService<br/>business rules and validation"]
+            R["InMemoryOrderRepository<br/>orders saved in memory"]
+            M["Order / CreateOrderRequest"]
+        end
     end
 
-    Client -->|"1. HTTP request"| GW
-    GW -->|"2a. small JSON<br/>(mapping templates)"| LA
-    GW -->|"2b. full HTTP event"| LB
-    LA --> D
-    LB --> H
+    Client -->|"HTTP request"| GW
+    GW -->|"A: small JSON<br/>(mapping templates)"| LA
+    GW -->|"B: the whole request"| LB
+    LA -->|calls| D
+    LB -->|calls| H
     D --> S
     H --> S
     S --> R
-    GW -.->|"3. HTTP response"| Client
+    S -.uses.-> M
+    H -.logs.-> CW
+    GW -->|"HTTP response"| Client
 
     classDef aws fill:#FFE8CC,stroke:#FF9900,color:#000
     classDef awsJava fill:#FFF5B8,stroke:#C9A800,color:#000
     classDef plain fill:#D9F2DC,stroke:#2E8B3A,color:#000
-    class GW,LA,LB aws
+    classDef client fill:#DCE9FF,stroke:#3B6FD8,color:#000
+    class GW,LA,LB,CW aws
     class H awsJava
-    class D,S,R plain
+    class D,S,R,M plain
+    class Client client
+    style AWS fill:#FFF8EF,stroke:#FF9900
+    style JAR fill:#F7F7F7,stroke:#999
+    style AWSJAVA fill:#FFFBE0,stroke:#C9A800
+    style PLAIN fill:#EEF9F0,stroke:#2E8B3A
+    style A fill:#FFF1E0,stroke:#FF9900
+    style B fill:#FFF1E0,stroke:#FF9900
 ```
 
-**How to read it**
+**Colors**
 
-| Color | Meaning |
+| Color | What it is |
 |---|---|
-| Orange | AWS services, configured in the console (API Gateway and the Lambda functions) |
-| Yellow | Java that depends on AWS libraries: only `OrdersApiHandler`, because it reads the API Gateway event |
-| Green | Ordinary Java with no AWS or HTTP code. It compiles, runs and is tested without AWS |
+| Blue | The client that calls the API |
+| Orange | AWS services: API Gateway, the Lambdas and CloudWatch |
+| Yellow | Our Java that uses AWS libraries. Only `OrdersApiHandler`, because it reads the API Gateway event |
+| Green | Plain Java. It runs and is tested without AWS |
 
-Solid arrows show who calls whom; the dotted arrow is the response going back to the client. Both architectures share the same `OrderService`: the only difference is who does the HTTP work (API Gateway in A, `OrdersApiHandler` in B).
+The arrows show who calls whom; the response goes back the same way. Both architectures use the same `OrderService`. The only difference is who does the HTTP part: API Gateway in A, `OrdersApiHandler` in B.
 
 ## 11. AI-assisted development and critique of the agent
 
