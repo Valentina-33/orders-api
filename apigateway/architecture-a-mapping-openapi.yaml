@@ -10,7 +10,7 @@
 #   orders-find-orders   -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::findOrdersByCustomer
 #   orders-delete-order  -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::deleteOrder
 #
-# REGION_PLACEHOLDER and ACCOUNT_ID_PLACEHOLDER are replaced by deploy/deploy.sh.
+# Replace REGION_PLACEHOLDER and ACCOUNT_ID_PLACEHOLDER before importing (README section 12).
 # Import by hand: API Gateway console > Create API > REST API > Import.
 openapi: 3.0.1
 info:

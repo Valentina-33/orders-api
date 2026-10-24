@@ -51,7 +51,6 @@ orders-api/
 ├── apigateway/
 │   ├── architecture-a-mapping-openapi.yaml   API Gateway config, non-proxy + mapping templates
 │   └── architecture-b-proxy-openapi.yaml     API Gateway config, proxy integration
-├── deploy/deploy.sh                          AWS CLI script: Lambdas + both APIs
 ├── docs/
 │   ├── delete-prediction.md                  Prediction written before implementing DELETE
 │   ├── Demonstration.mp4                     Demo video (Git LFS)
@@ -59,7 +58,6 @@ orders-api/
 ├── events/                                   JSON used to invoke the Lambdas by hand
 │   ├── direct-*.json                         inputs for the direct (Part II / Architecture A) functions
 │   └── proxy-*.json                          API Gateway proxy events (Architecture B)
-├── examples/curl-examples.sh                 calls every endpoint of a deployed API
 └── src/
     ├── main/java/edu/escuelaing/orders/
     │   ├── domain/            Order, CreateOrderRequest                       plain Java
@@ -359,8 +357,6 @@ curl -i -X POST https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev/or
 curl -i -X POST https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev/orders -H "Content-Type: application/json" -d '{"customerId":"CUST-42","product":"","quantity":0}'
 ```
 
-Or run everything at once: `./examples/curl-examples.sh <invoke URL>`.
-
 Expected results:
 
 | Request | Status | Body |
@@ -647,38 +643,56 @@ I used Claude Code as a coding assistant. Before writing code I asked it to expl
 
 ## 12. How to deploy
 
-### Option 1: script (AWS CLI / CloudShell)
+These are the steps I followed in the AWS Academy Learner Lab (region `us-east-1`, role `LabRole`).
 
-1. `mvn package`
-2. Open AWS CloudShell (or any shell with the AWS CLI and credentials) and upload the repository, or at least `target/orders-api-1.0.0.jar`, `apigateway/` and `deploy/`.
-3. Run:
+### 1. Build the JAR
 
 ```bash
-./deploy/deploy.sh all
+mvn clean package
 ```
 
-It creates the five Lambda functions (Java 17, role `LabRole` by default, override with `LAMBDA_ROLE_ARN`), imports both OpenAPI files as two REST APIs, grants API Gateway permission to invoke the functions and deploys the stage (`STAGE`, default `Alpha_dev`). It prints both invoke URLs.
+### 2. Create the Lambda functions
 
-### Option 2: console, by hand
+Repeat for each function in the tables of sections 5 and 7 (`orders-create-order`, `orders-get-order`, `orders-find-orders`, `orders-delete-order` and `orders-api-proxy`):
 
-**Lambda** (repeat per function in the tables of sections 5 and 7):
-1. Lambda -> *Create function* -> *Author from scratch*, runtime **Java 17**, execution role: existing role (`LabRole` in the Learner Lab).
-2. *Code* -> *Upload from* -> *.zip or .jar file* -> `target/orders-api-1.0.0.jar`.
-3. *Runtime settings* -> *Edit* -> *Handler*: e.g. `edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::getOrder`.
-4. *Configuration* -> *General* -> memory 512 MB, timeout 15 s.
-5. *Test* with the matching file from `events/`.
+1. Lambda -> *Create function* -> *Author from scratch*, runtime **Java 17**, architecture x86_64, execution role: existing role `LabRole`.
+2. *Code* -> *Upload from* -> *.zip or .jar file* -> `target/orders-api-1.0.0.jar`. It's the same JAR for every function.
+3. *Runtime settings* -> *Edit* -> *Handler*, for example `edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::getOrder`.
+4. *Configuration* -> *General configuration* -> memory 512 MB, timeout 15 s.
+5. *Test* with the matching JSON from `events/`.
 
-**API Gateway, quickest:** *Create API* -> *REST API* -> *Import* -> paste the OpenAPI file after replacing `REGION_PLACEHOLDER` and `ACCOUNT_ID_PLACEHOLDER`. Then for each function run `aws lambda add-permission ...` (see the script) or open each method's *Integration request* -> *Edit* -> *Save*, which makes the console offer to add the permission. *Deploy API* -> new stage `Alpha_dev`.
+### 3. Prepare the API Gateway files
 
-**API Gateway, step by step (Architecture A):**
-1. *Create resource* `/orders`, then child `/{id}`.
-2. `GET` on `/{id}` -> integration type *Lambda function*, **Lambda proxy integration off**, function `orders-get-order`.
-3. *Integration request* -> *Mapping templates* -> content type `application/json` -> template from section 6.
-4. *Method response* -> add 404, 400, 500. *Integration response* -> add one entry per row of the regex table in section 6, each with its template.
-5. Same for `GET /orders` (`orders-find-orders`), `POST /orders` (`orders-create-order`, default response 201 + `Location`), `DELETE /orders/{id}` (`orders-delete-order`, default response 204).
-6. *Deploy API*.
+The OpenAPI files have two placeholders. Replace them with your region and your 12-digit account ID (without dashes):
 
-**Architecture B:** create the same resources, and for every method choose *Lambda function* with **Lambda proxy integration on**, function `orders-api-proxy`. Nothing else. *Deploy API*.
+```bash
+sed -e "s/REGION_PLACEHOLDER/us-east-1/g" -e "s/ACCOUNT_ID_PLACEHOLDER/<account-id>/g" apigateway/architecture-a-mapping-openapi.yaml > target/api-a.yaml
+sed -e "s/REGION_PLACEHOLDER/us-east-1/g" -e "s/ACCOUNT_ID_PLACEHOLDER/<account-id>/g" apigateway/architecture-b-proxy-openapi.yaml > target/api-b.yaml
+```
+
+### 4. Import each API
+
+API Gateway -> *Create API* -> *REST API* -> *Import* -> upload `target/api-a.yaml` (and later `target/api-b.yaml`) -> endpoint type *Regional* -> *Create API*.
+
+### 5. Let API Gateway call the Lambdas
+
+Importing doesn't create the permissions. In CloudShell, with the id of the imported API:
+
+```bash
+API_ID=<api-id>
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+for fn in orders-create-order orders-get-order orders-find-orders orders-delete-order; do
+  aws lambda add-permission --function-name $fn --statement-id apigw-$API_ID \
+    --action lambda:InvokeFunction --principal apigateway.amazonaws.com \
+    --source-arn "arn:aws:execute-api:us-east-1:$ACCOUNT_ID:$API_ID/*/*/*"
+done
+```
+
+For Architecture B it's the same command with only `orders-api-proxy`. Without this step the API answers `500 Internal server error`.
+
+### 6. Deploy
+
+*Deploy API* -> *New stage* -> `Alpha_dev`. The invoke URL looks like `https://<api-id>.execute-api.us-east-1.amazonaws.com/Alpha_dev`.
 
 ## 13. Screenshots
 

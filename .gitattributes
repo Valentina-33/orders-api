@@ -1,3 +1,2 @@
 * text=auto
-*.sh text eol=lf
 docs/Demonstration.mp4 filter=lfs diff=lfs merge=lfs -text

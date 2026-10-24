@@ -7,7 +7,7 @@
 # There are no mapping templates, no integration responses and no regexes: method,
 # path parameters, query string, headers and body all reach Java unchanged.
 #
-# REGION_PLACEHOLDER and ACCOUNT_ID_PLACEHOLDER are replaced by deploy/deploy.sh.
+# Replace REGION_PLACEHOLDER and ACCOUNT_ID_PLACEHOLDER before importing (README section 12).
 openapi: 3.0.1
 info:
   title: orders-api-proxy
