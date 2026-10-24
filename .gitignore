@@ -4,3 +4,4 @@ target/
 .vscode/
 out.json
 *.mp4
+!docs/Demonstration.mp4

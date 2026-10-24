@@ -54,7 +54,8 @@ orders-api/
 ├── deploy/deploy.sh                          AWS CLI script: Lambdas + both APIs
 ├── docs/
 │   ├── delete-prediction.md                  Prediction written before implementing DELETE
-│   └── evidence/                             Screenshots of the Lambdas and API Gateway
+│   ├── Demonstration.mp4                     Demo video (Git LFS)
+│   └── evidence/                             Screenshots of the Lambdas, API Gateway and curl calls
 ├── events/                                   JSON used to invoke the Lambdas by hand
 │   ├── direct-*.json                         inputs for the direct (Part II / Architecture A) functions
 │   └── proxy-*.json                          API Gateway proxy events (Architecture B)
@@ -703,9 +704,17 @@ All screenshots are in [`docs/evidence/`](docs/evidence/).
 
 ![Architecture B permission](docs/evidence/05-api-b-proxy-permission.png)
 
+**06. Calling the deployed API (Architecture B, stage `Alpha_dev`) with `curl`.** `POST /orders` returns `201 Created` with `Location: /orders/ORD-004`, `GET /orders/ORD-001` returns `200 OK`, and `GET /orders/ORD-999` returns `404 Not Found` with the `ORDER_NOT_FOUND` error. (The `bash: ... command not found` lines are just the titles I pasted along with the commands.)
+
+![curl POST, GET and 404](docs/evidence/06-api-curl-post-get-404.png)
+
+**07. More calls to the deployed API.** A `POST` with invalid data returns `400 Bad Request` with `INVALID_REQUEST`. The first `DELETE /orders/ORD-002` returns `204 No Content` and the second one returns `404 Not Found`, because the order is already gone.
+
+![curl 400 and DELETE](docs/evidence/07-api-curl-400-delete.png)
+
 ## 14. Demo video
 
-Video: [watch the demo](VIDEO_LINK)
+Video: [docs/Demonstration.mp4](docs/Demonstration.mp4) (stored with Git LFS; open it on GitHub and click *Download* or *View raw*)
 
 What it shows:
 
