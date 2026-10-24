@@ -1,0 +1,269 @@
+# Architecture A: API Gateway non-proxy ("AWS") integration with mapping templates.
+#
+# API Gateway does the HTTP work here: it routes, extracts {id} and ?customerId,
+# builds the small JSON each Lambda expects, and chooses the status code by matching
+# a regex against the Lambda errorMessage.
+#
+# One Lambda per operation, all from the same JAR:
+#   orders-create-order  -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::createOrder
+#   orders-get-order     -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::getOrder
+#   orders-find-orders   -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::findOrdersByCustomer
+#
+# REGION_PLACEHOLDER and ACCOUNT_ID_PLACEHOLDER are replaced by deploy/deploy.sh.
+# Import by hand: API Gateway console > Create API > REST API > Import.
+openapi: 3.0.1
+info:
+  title: orders-api-mapping
+  description: Orders API, Architecture A (non-proxy integration + mapping templates)
+  version: 1.0.0
+
+paths:
+  /orders:
+    post:
+      summary: Create an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Invalid or malformed order data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-amazon-apigateway-integration:
+        type: aws
+        httpMethod: POST
+        uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-create-order/invocations
+        passthroughBehavior: never
+        requestTemplates:
+          # The body already has the shape of CreateOrderRequest, so it is passed as is.
+          application/json: |
+            $input.json('$')
+        responses:
+          default:
+            statusCode: '201'
+            responseTemplates:
+              application/json: |
+                #set($context.responseOverride.header.Location = "/orders/$input.path('$.id')")
+                $input.json('$')
+          'INVALID_REQUEST: .*':
+            statusCode: '400'
+            responseTemplates:
+              application/json: |
+                #set($msg = $input.path('$.errorMessage'))
+                #set($start = $msg.indexOf(': ') + 2)
+                {
+                  "error": "INVALID_REQUEST",
+                  "message": "$util.escapeJavaScript($msg.substring($start))"
+                }
+          # The Lambda runtime itself fails with this message when the body cannot be
+          # converted into CreateOrderRequest (for example "quantity": "abc").
+          '(?s)An error occurred during JSON parsing.*':
+            statusCode: '400'
+            responseTemplates:
+              application/json: |
+                {
+                  "error": "MALFORMED_JSON",
+                  "message": "Request body is not valid JSON for this operation"
+                }
+          '(?s)(?!INVALID_REQUEST: |ORDER_NOT_FOUND: |An error occurred during JSON parsing).+':
+            statusCode: '500'
+            responseTemplates:
+              application/json: |
+                {
+                  "error": "INTERNAL_ERROR",
+                  "message": "An unexpected error occurred"
+                }
+
+    get:
+      summary: Find the orders of a customer
+      parameters:
+        - name: customerId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Orders of the customer (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+        '400':
+          description: customerId is missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-amazon-apigateway-integration:
+        type: aws
+        httpMethod: POST
+        uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-find-orders/invocations
+        passthroughBehavior: never
+        requestTemplates:
+          # GET /orders?customerId=CUST-42  ->  {"customerId": "CUST-42"}
+          application/json: |
+            {
+              "customerId": "$util.escapeJavaScript($input.params().querystring.get('customerId'))"
+            }
+        responses:
+          default:
+            statusCode: '200'
+          'INVALID_REQUEST: .*':
+            statusCode: '400'
+            responseTemplates:
+              application/json: |
+                #set($msg = $input.path('$.errorMessage'))
+                #set($start = $msg.indexOf(': ') + 2)
+                {
+                  "error": "INVALID_REQUEST",
+                  "message": "$util.escapeJavaScript($msg.substring($start))"
+                }
+          '(?s)(?!INVALID_REQUEST: |ORDER_NOT_FOUND: ).+':
+            statusCode: '500'
+            responseTemplates:
+              application/json: |
+                {
+                  "error": "INTERNAL_ERROR",
+                  "message": "An unexpected error occurred"
+                }
+
+  /orders/{id}:
+    get:
+      summary: Retrieve an order
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          description: The order does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-amazon-apigateway-integration:
+        type: aws
+        httpMethod: POST
+        uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-get-order/invocations
+        passthroughBehavior: never
+        requestTemplates:
+          # GET /orders/ORD-42  ->  {"id": "ORD-42"}
+          application/json: |
+            {
+              "id": "$util.escapeJavaScript($input.params().path.get('id'))"
+            }
+        responses:
+          default:
+            statusCode: '200'
+          'ORDER_NOT_FOUND: .*':
+            statusCode: '404'
+            responseTemplates:
+              application/json: |
+                #set($msg = $input.path('$.errorMessage'))
+                #set($start = $msg.indexOf(': ') + 2)
+                {
+                  "error": "ORDER_NOT_FOUND",
+                  "message": "$util.escapeJavaScript($msg.substring($start))"
+                }
+          'INVALID_REQUEST: .*':
+            statusCode: '400'
+            responseTemplates:
+              application/json: |
+                #set($msg = $input.path('$.errorMessage'))
+                #set($start = $msg.indexOf(': ') + 2)
+                {
+                  "error": "INVALID_REQUEST",
+                  "message": "$util.escapeJavaScript($msg.substring($start))"
+                }
+          '(?s)(?!INVALID_REQUEST: |ORDER_NOT_FOUND: ).+':
+            statusCode: '500'
+            responseTemplates:
+              application/json: |
+                {
+                  "error": "INTERNAL_ERROR",
+                  "message": "An unexpected error occurred"
+                }
+
+components:
+  schemas:
+    CreateOrderRequest:
+      type: object
+      properties:
+        customerId:
+          type: string
+        product:
+          type: string
+        quantity:
+          type: integer
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+        product:
+          type: string
+        quantity:
+          type: integer
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+# Errors produced by API Gateway itself (unknown route, throttling, ...) use the same
+# {"error", "message"} shape as the application errors.
+x-amazon-apigateway-gateway-responses:
+  DEFAULT_4XX:
+    responseTemplates:
+      application/json: '{"error": "$context.error.responseType", "message": $context.error.messageString}'
+  DEFAULT_5XX:
+    responseTemplates:
+      application/json: '{"error": "$context.error.responseType", "message": $context.error.messageString}'

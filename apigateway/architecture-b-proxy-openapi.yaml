@@ -1,0 +1,70 @@
+# Architecture B: API Gateway Lambda proxy integration.
+#
+# API Gateway only routes. Every route goes to the same Lambda, which receives the whole
+# HTTP request as an event and returns statusCode, headers and body itself:
+#   orders-api-proxy -> edu.escuelaing.orders.lambda.proxy.OrdersApiHandler::handleRequest
+#
+# There are no mapping templates, no integration responses and no regexes: method,
+# path parameters, query string, headers and body all reach Java unchanged.
+#
+# REGION_PLACEHOLDER and ACCOUNT_ID_PLACEHOLDER are replaced by deploy/deploy.sh.
+openapi: 3.0.1
+info:
+  title: orders-api-proxy
+  description: Orders API, Architecture B (Lambda proxy integration + Java HTTP adapter)
+  version: 1.0.0
+
+paths:
+  /orders:
+    post:
+      summary: Create an order (201 + Location, 400)
+      responses:
+        '201':
+          description: Order created
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-api-proxy/invocations
+        passthroughBehavior: when_no_match
+    get:
+      summary: Find the orders of a customer (200, 400)
+      parameters:
+        - name: customerId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Orders of the customer
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-api-proxy/invocations
+        passthroughBehavior: when_no_match
+
+  /orders/{id}:
+    get:
+      summary: Retrieve an order (200, 404)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The order
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-api-proxy/invocations
+        passthroughBehavior: when_no_match
+
+x-amazon-apigateway-gateway-responses:
+  DEFAULT_4XX:
+    responseTemplates:
+      application/json: '{"error": "$context.error.responseType", "message": $context.error.messageString}'
+  DEFAULT_5XX:
+    responseTemplates:
+      application/json: '{"error": "$context.error.responseType", "message": $context.error.messageString}'

@@ -1,0 +1,31 @@
+{
+  "resource": "/orders",
+  "path": "/orders",
+  "httpMethod": "GET",
+  "headers": {
+    "Accept": "application/json",
+    "Host": "abc123defg.execute-api.us-east-1.amazonaws.com"
+  },
+  "multiValueHeaders": {
+    "Accept": ["application/json"],
+    "Host": ["abc123defg.execute-api.us-east-1.amazonaws.com"]
+  },
+  "queryStringParameters": {
+    "customerId": "CUST-42"
+  },
+  "multiValueQueryStringParameters": {
+    "customerId": ["CUST-42"]
+  },
+  "pathParameters": null,
+  "stageVariables": null,
+  "requestContext": {
+    "resourcePath": "/orders",
+    "httpMethod": "GET",
+    "path": "/dev/orders",
+    "stage": "dev",
+    "requestId": "d1b2c3d4-0000-4000-8000-000000000002",
+    "apiId": "abc123defg"
+  },
+  "body": null,
+  "isBase64Encoded": false
+}
