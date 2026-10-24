@@ -29,3 +29,6 @@ call -X POST "$BASE_URL/orders" -H "Content-Type: application/json" \
   -d '{"customerId": "CUST-42", "product": "", "quantity": 0}'
 call -X POST "$BASE_URL/orders" -H "Content-Type: application/json" \
   -d '{"customerId": "CUST-42", "product": "Mouse", "quantity": "abc"}'
+call -X DELETE "$BASE_URL/orders/ORD-002"
+call -X DELETE "$BASE_URL/orders/ORD-002"
+call -X DELETE "$BASE_URL/orders/ORD-999"

@@ -113,6 +113,26 @@ class OrderServiceTest {
     }
 
     @Test
+    void deletesAnExistingOrder() {
+        service.deleteOrder("ORD-002");
+
+        assertThrows(OrderNotFoundException.class, () -> service.getOrder("ORD-002"));
+        assertEquals(List.of("ORD-001"), service.getOrdersByCustomer("CUST-42").stream().map(Order::getId).toList());
+    }
+
+    @Test
+    void failsWhenDeletingAMissingOrder() {
+        OrderNotFoundException e = assertThrows(OrderNotFoundException.class, () -> service.deleteOrder("ORD-999"));
+
+        assertEquals("Order ORD-999 does not exist", e.getMessage());
+    }
+
+    @Test
+    void rejectsABlankIdWhenDeleting() {
+        assertThrows(InvalidOrderException.class, () -> service.deleteOrder(" "));
+    }
+
+    @Test
     void rejectsABlankCustomerIdInTheSearch() {
         assertThrows(InvalidOrderException.class, () -> service.getOrdersByCustomer(""));
         assertThrows(InvalidOrderException.class, () -> service.getOrdersByCustomer(null));

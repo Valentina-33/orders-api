@@ -60,6 +60,22 @@ paths:
         httpMethod: POST
         uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-api-proxy/invocations
         passthroughBehavior: when_no_match
+    delete:
+      summary: Delete an order (204, 404)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Order deleted
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-api-proxy/invocations
+        passthroughBehavior: when_no_match
 
 x-amazon-apigateway-gateway-responses:
   DEFAULT_4XX:

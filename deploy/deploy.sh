@@ -25,7 +25,7 @@ JAR="target/orders-api-1.0.0.jar"
 DIRECT="edu.escuelaing.orders.lambda.direct.DirectOrderFunctions"
 PROXY="edu.escuelaing.orders.lambda.proxy.OrdersApiHandler"
 
-A_FUNCTIONS=(orders-create-order orders-get-order orders-find-orders)
+A_FUNCTIONS=(orders-create-order orders-get-order orders-find-orders orders-delete-order)
 B_FUNCTIONS=(orders-api-proxy)
 
 deploy_function() {
@@ -52,6 +52,7 @@ deploy_lambdas() {
   deploy_function orders-create-order "$DIRECT::createOrder"
   deploy_function orders-get-order "$DIRECT::getOrder"
   deploy_function orders-find-orders "$DIRECT::findOrdersByCustomer"
+  deploy_function orders-delete-order "$DIRECT::deleteOrder"
   deploy_function orders-api-proxy "$PROXY::handleRequest"
 }
 

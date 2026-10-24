@@ -54,6 +54,16 @@ class DirectOrderFunctionsTest {
     }
 
     @Test
+    void deleteOfAMissingOrderIsPrefixedWithOrderNotFound() {
+        functions.deleteOrder(new OrderIdInput("ORD-001"));
+
+        DirectFunctionException e = assertThrows(DirectFunctionException.class,
+                () -> functions.deleteOrder(new OrderIdInput("ORD-001")));
+
+        assertEquals("ORDER_NOT_FOUND: Order ORD-001 does not exist", e.getMessage());
+    }
+
+    @Test
     void treatsAMissingInputObjectAsInvalid() {
         DirectFunctionException e = assertThrows(DirectFunctionException.class,
                 () -> functions.findOrdersByCustomer(null));

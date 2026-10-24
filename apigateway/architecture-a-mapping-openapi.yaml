@@ -8,6 +8,7 @@
 #   orders-create-order  -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::createOrder
 #   orders-get-order     -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::getOrder
 #   orders-find-orders   -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::findOrdersByCustomer
+#   orders-delete-order  -> edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::deleteOrder
 #
 # REGION_PLACEHOLDER and ACCOUNT_ID_PLACEHOLDER are replaced by deploy/deploy.sh.
 # Import by hand: API Gateway console > Create API > REST API > Import.
@@ -199,6 +200,76 @@ paths:
         responses:
           default:
             statusCode: '200'
+          'ORDER_NOT_FOUND: .*':
+            statusCode: '404'
+            responseTemplates:
+              application/json: |
+                #set($msg = $input.path('$.errorMessage'))
+                #set($start = $msg.indexOf(': ') + 2)
+                {
+                  "error": "ORDER_NOT_FOUND",
+                  "message": "$util.escapeJavaScript($msg.substring($start))"
+                }
+          'INVALID_REQUEST: .*':
+            statusCode: '400'
+            responseTemplates:
+              application/json: |
+                #set($msg = $input.path('$.errorMessage'))
+                #set($start = $msg.indexOf(': ') + 2)
+                {
+                  "error": "INVALID_REQUEST",
+                  "message": "$util.escapeJavaScript($msg.substring($start))"
+                }
+          '(?s)(?!INVALID_REQUEST: |ORDER_NOT_FOUND: ).+':
+            statusCode: '500'
+            responseTemplates:
+              application/json: |
+                {
+                  "error": "INTERNAL_ERROR",
+                  "message": "An unexpected error occurred"
+                }
+
+    delete:
+      summary: Delete an order
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Order deleted, no body
+        '404':
+          description: The order does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-amazon-apigateway-integration:
+        type: aws
+        httpMethod: POST
+        uri: arn:aws:apigateway:REGION_PLACEHOLDER:lambda:path/2015-03-31/functions/arn:aws:lambda:REGION_PLACEHOLDER:ACCOUNT_ID_PLACEHOLDER:function:orders-delete-order/invocations
+        passthroughBehavior: never
+        requestTemplates:
+          # DELETE /orders/ORD-42  ->  {"id": "ORD-42"}
+          application/json: |
+            {
+              "id": "$util.escapeJavaScript($input.params().path.get('id'))"
+            }
+        responses:
+          # The Lambda returns null. 204 must not have a body, so the template outputs nothing.
+          default:
+            statusCode: '204'
+            responseTemplates:
+              application/json: |
+                #set($noBody = "")
           'ORDER_NOT_FOUND: .*':
             statusCode: '404'
             responseTemplates:

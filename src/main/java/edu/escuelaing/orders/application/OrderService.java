@@ -63,6 +63,14 @@ public class OrderService {
         return repository.findByCustomerId(customerId.trim());
     }
 
+    /** Deletes an order. Deleting an order that does not exist is an error, not a silent no-op. */
+    public void deleteOrder(String id) {
+        requireText(id, "id");
+        if (!repository.deleteById(id.trim())) {
+            throw new OrderNotFoundException(id.trim());
+        }
+    }
+
     private static void requireText(String value, String name) {
         if (isBlank(value)) {
             throw new InvalidOrderException(name + " is required");

@@ -67,6 +67,7 @@ public class OrdersApiHandler implements RequestHandler<APIGatewayProxyRequestEv
             case "POST /orders" -> createOrder(request);
             case "GET /orders" -> findOrdersByCustomer(request);
             case "GET /orders/{id}" -> getOrder(request);
+            case "DELETE /orders/{id}" -> deleteOrder(request);
             default -> error(404, "ROUTE_NOT_FOUND", "No route for " + route);
         };
     }
@@ -84,6 +85,11 @@ public class OrdersApiHandler implements RequestHandler<APIGatewayProxyRequestEv
 
     private APIGatewayProxyResponseEvent findOrdersByCustomer(APIGatewayProxyRequestEvent request) {
         return json(200, service.getOrdersByCustomer(param(request.getQueryStringParameters(), "customerId")));
+    }
+
+    private APIGatewayProxyResponseEvent deleteOrder(APIGatewayProxyRequestEvent request) {
+        service.deleteOrder(param(request.getPathParameters(), "id"));
+        return new APIGatewayProxyResponseEvent().withStatusCode(204);
     }
 
     private static String param(Map<String, String> params, String name) {

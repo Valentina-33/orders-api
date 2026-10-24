@@ -200,7 +200,7 @@ public class OrderService {
 
 ### Tests
 
-`mvn test` runs 33 tests (37 after the DELETE extension):
+`mvn test` runs 40 tests (33 before the DELETE extension):
 
 | Test class | What it covers |
 |---|---|
@@ -212,7 +212,7 @@ public class OrderService {
 
 | Question | Answer |
 |---|---|
-| Can the functionality be tested without AWS? | Yes. All 33 tests run on a laptop with `mvn test`, no AWS account, no network. Even the Lambda handlers are tested by calling them as ordinary Java methods. |
+| Can the functionality be tested without AWS? | Yes. All the tests (33 at this point, 40 at the end) run on a laptop with `mvn test`, no AWS account, no network. Even the Lambda handlers are tested by calling them as ordinary Java methods. |
 | Does it require a web server? | No. There is no Tomcat, Netty or socket. In AWS, API Gateway receives HTTP and Lambda calls our methods. |
 | Does it require Spring Boot? | No. There is no framework at all; `OrdersApplication` wires three objects by hand. |
 | What does the generated JAR contain? | Our compiled classes (`domain`, `application`, `persistence`, `lambda`) plus, because of the Shade plugin, the classes of `aws-lambda-java-core`, `aws-lambda-java-events`, `jackson-*` and `joda-time` (a dependency of the events library). No `main` method and no server. `target/original-orders-api-1.0.0.jar` (20 KB) is the same thing without dependencies. |
@@ -227,6 +227,7 @@ The class `lambda.direct.DirectOrderFunctions` exposes each operation as a Lambd
 | `orders-create-order` | `edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::createOrder` | `events/direct-create-order.json` |
 | `orders-get-order` | `edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::getOrder` | `events/direct-get-order.json` |
 | `orders-find-orders` | `edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::findOrdersByCustomer` | `events/direct-find-orders.json` |
+| `orders-delete-order` (final challenge) | `edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::deleteOrder` | `events/direct-delete-order.json` |
 
 Runtime: **Java 17**, memory 512 MB, timeout 15 s, code: `target/orders-api-1.0.0.jar`.
 
@@ -284,7 +285,8 @@ flowchart LR
     G -->|"{&quot;customerId&quot;,...}"| L1["λ orders-create-order<br/>::createOrder"]
     G -->|"{&quot;id&quot;: &quot;ORD-42&quot;}"| L2["λ orders-get-order<br/>::getOrder"]
     G -->|"{&quot;customerId&quot;: &quot;CUST-42&quot;}"| L3["λ orders-find-orders<br/>::findOrdersByCustomer"]
-    L1 & L2 & L3 --> S["OrderService (plain Java)"]
+    G -->|"{&quot;id&quot;: &quot;ORD-42&quot;}"| L4["λ orders-delete-order<br/>::deleteOrder"]
+    L1 & L2 & L3 & L4 --> S["OrderService (plain Java)"]
 ```
 
 ### Request mapping
@@ -366,6 +368,8 @@ Expected results:
 | `GET /orders` | 400 | `{"error":"INVALID_REQUEST","message":"customerId is required"}` |
 | `POST /orders` valid | 201 | the new order, `Location: /orders/ORD-004` |
 | `POST /orders` with `quantity: 0` | 400 | `{"error":"INVALID_REQUEST","message":"product is required; quantity must be greater than 0"}` |
+| `DELETE /orders/ORD-002` | 204 | empty |
+| `DELETE /orders/ORD-002` again | 404 | `{"error":"ORDER_NOT_FOUND","message":"Order ORD-002 does not exist"}` |
 
 > **Important side effect of one Lambda per operation:** after `POST /orders` creates `ORD-004` in `orders-create-order`, `GET /orders/ORD-004` returns **404**, because `orders-get-order` is a different function with its own memory. The sample orders work in every function because each one loads them on its cold start. This is the in-memory limitation made visible; with a real database it disappears.
 
@@ -457,6 +461,7 @@ flowchart LR
 |---|---|---|
 | `Order` from `createOrder` | 201 | order JSON, `Location: /orders/{id}` |
 | `Order` / `List<Order>` from a GET | 200 | JSON |
+| `deleteOrder` returns normally | 204 | no body |
 | `InvalidOrderException` | 400 | `INVALID_REQUEST` |
 | body missing / not JSON / wrong types | 400 | `MALFORMED_JSON` |
 | `OrderNotFoundException` | 404 | `ORDER_NOT_FOUND` |
@@ -511,7 +516,21 @@ I would not use one function for 30 operations forever: I would group by resourc
 
 ## 9. Final challenge: DELETE /orders/{id}
 
-See [`docs/delete-prediction.md`](docs/delete-prediction.md). It was committed *before* the implementation; the comparison with what was actually done is at the end of that file.
+The prediction is in [`docs/delete-prediction.md`](docs/delete-prediction.md). It was committed *before* the implementation (`git log` shows the prediction commit first); the comparison with what was actually done is at the end of that file.
+
+What changed:
+
+| Layer | Change |
+|---|---|
+| `OrderRepository` / `InMemoryOrderRepository` | `boolean deleteById(String id)` |
+| `OrderService` | `void deleteOrder(String id)`: throws `OrderNotFoundException` if nothing was deleted |
+| Architecture A | new function `orders-delete-order` → `DirectOrderFunctions::deleteOrder` (returns `void`); new `DELETE /orders/{id}` method with a request template, `default` → **204** with an empty template, and the same 404/400/500 regexes |
+| Architecture B | one `case "DELETE /orders/{id}"` in `OrdersApiHandler` returning 204; one new method in the OpenAPI file pointing to the **existing** function |
+| Tests | 7 new tests (service, direct function, adapter, saved `events/proxy-delete-order.json`) |
+
+The 404 case needed **no new code** in either architecture: "not found" was already an exception in the service and already mapped to 404 by both adapters. That is the payoff of keeping the decision ("did it exist?") in the service and the translation (204/404) at the edge.
+
+Note on idempotency: `DELETE` is idempotent in HTTP terms because the *state* after one or many calls is the same (the order is gone). Returning 404 on the second call does not break that; it just reports that there was nothing to delete.
 
 ## 10. Final architecture diagram
 

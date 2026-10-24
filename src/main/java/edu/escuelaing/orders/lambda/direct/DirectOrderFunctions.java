@@ -46,6 +46,14 @@ public class DirectOrderFunctions {
         return translateErrors(() -> service.getOrdersByCustomer(query == null ? null : query.getCustomerId()));
     }
 
+    /** Input: {@code {"id": "ORD-001"}}. Returns nothing; API Gateway maps the success to 204. */
+    public void deleteOrder(OrderIdInput input) {
+        translateErrors(() -> {
+            service.deleteOrder(input == null ? null : input.getId());
+            return null;
+        });
+    }
+
     // Unexpected exceptions are not caught: their message has no known code, so the
     // API Gateway mapping sends them to the 500 response.
     private static <T> T translateErrors(Supplier<T> operation) {

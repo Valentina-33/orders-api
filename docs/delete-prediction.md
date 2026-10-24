@@ -42,4 +42,16 @@ In `OrderService.deleteOrder` (the rule "you cannot delete what does not exist" 
 
 ## Comparison with the agent's proposal
 
-_Filled in after the implementation (see the next commit)._
+The assistant's proposal matched the prediction on the main points: same classes, same place for the logic (`OrderService`), same split of the 204/404 decision, a new function only in Architecture A, and a gateway change in both.
+
+| Topic | Prediction | Agent's proposal / final implementation | Comment |
+|---|---|---|---|
+| Repository method | `boolean deleteById(String id)` | Same | Returning `boolean` avoids a separate `findById` + `delete` (two steps that could race). |
+| Service signature | `void deleteOrder(String id)` throwing not found | Same | An alternative was returning the deleted `Order` (or `boolean`). The agent kept `void` + exception to be consistent with `getOrder`, so both adapters reuse their existing 404 mapping. |
+| Architecture A: Lambda return type | `void` | `void` | The runtime returns `null`. **Not predicted:** the agent pointed out that the `default` integration response needs an explicit (empty) template; otherwise the default passthrough would send the text `null` as the body of the 204. |
+| Architecture A: 404 | Regex `ORDER_NOT_FOUND: .*` | Same, plus the 400 and catch-all 500 regexes copied again | This copy-paste is the "30 operations" problem in small. |
+| Architecture B: 204 body | No body | `withStatusCode(204)` with no body and no `Content-Type` header | Not predicted in detail: a 204 must not have a body, so the JSON content-type header is also left out. |
+| Tests | service + adapter + direct | Same, plus the saved event `events/proxy-delete-order.json` run through the handler | The extra event keeps the documented examples honest. |
+| Idempotency | Not considered | The agent raised whether the second `DELETE` should be 204 (idempotent "it's gone") or 404 | We kept 404 because the workshop asks for it, and documented why it still respects HTTP idempotency (same server state). |
+
+What surprised me: the amount of work was very different between the architectures. B was one `case` line plus one Java method; A needed a new function, a new permission and ~60 lines of YAML, even though the business logic was identical.

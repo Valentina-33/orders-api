@@ -20,6 +20,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class OrdersApiHandlerTest {
 
@@ -121,6 +122,32 @@ class OrdersApiHandlerTest {
     }
 
     @Test
+    void deleteOfAnExistingOrderReturns204WithoutBody() {
+        APIGatewayProxyResponseEvent response = handle(request("DELETE", "/orders/{id}")
+                .withPathParameters(Map.of("id", "ORD-002")));
+
+        assertEquals(204, response.getStatusCode());
+        assertNull(response.getBody());
+    }
+
+    @Test
+    void deleteOfAMissingOrderReturns404() throws IOException {
+        APIGatewayProxyResponseEvent response = handle(request("DELETE", "/orders/{id}")
+                .withPathParameters(Map.of("id", "ORD-999")));
+
+        assertError(response, 404, "ORDER_NOT_FOUND", "Order ORD-999 does not exist");
+    }
+
+    @Test
+    void deletedOrderIsGoneAfterwards() throws IOException {
+        APIGatewayProxyRequestEvent delete = request("DELETE", "/orders/{id}").withPathParameters(Map.of("id", "ORD-001"));
+
+        assertEquals(204, handle(delete).getStatusCode());
+        assertError(handle(delete), 404, "ORDER_NOT_FOUND", "Order ORD-001 does not exist");
+        assertEquals(404, handle(request("GET", "/orders/{id}").withPathParameters(Map.of("id", "ORD-001"))).getStatusCode());
+    }
+
+    @Test
     void unknownRouteReturns404() throws IOException {
         assertError(handle(request("PATCH", "/orders/{id}")), 404, "ROUTE_NOT_FOUND", "No route for PATCH /orders/{id}");
     }
@@ -141,6 +168,7 @@ class OrdersApiHandlerTest {
         assertEquals(200, handle(readEvent("events/proxy-get-order.json")).getStatusCode());
         assertEquals(200, handle(readEvent("events/proxy-find-orders.json")).getStatusCode());
         assertEquals(201, handle(readEvent("events/proxy-post-order.json")).getStatusCode());
+        assertEquals(204, handle(readEvent("events/proxy-delete-order.json")).getStatusCode());
     }
 
     private APIGatewayProxyResponseEvent handle(APIGatewayProxyRequestEvent request) {
@@ -176,6 +204,11 @@ class OrdersApiHandlerTest {
 
         @Override
         public List<Order> findByCustomerId(String customerId) {
+            throw new IllegalStateException("disk on fire");
+        }
+
+        @Override
+        public boolean deleteById(String id) {
             throw new IllegalStateException("disk on fire");
         }
     }
