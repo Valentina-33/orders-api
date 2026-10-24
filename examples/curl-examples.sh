@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Calls every operation of a deployed Orders API and prints status, headers and body.
 #
-# Usage: ./examples/curl-examples.sh https://<api-id>.execute-api.<region>.amazonaws.com/dev
+# Usage: ./examples/curl-examples.sh https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev
 #
 # Works against both architectures. With Architecture A the POST and the GETs run in
 # different Lambda functions, so the order created here is NOT found by the next GET

@@ -347,12 +347,12 @@ The error template:
 ### Testing it
 
 ```bash
-curl -i https://<api-id>.execute-api.<region>.amazonaws.com/dev/orders/ORD-001
-curl -i https://<api-id>.execute-api.<region>.amazonaws.com/dev/orders/ORD-999
-curl -i "https://<api-id>.execute-api.<region>.amazonaws.com/dev/orders?customerId=CUST-42"
-curl -i "https://<api-id>.execute-api.<region>.amazonaws.com/dev/orders?customerId=CUST-100"
-curl -i -X POST https://<api-id>.execute-api.<region>.amazonaws.com/dev/orders -H "Content-Type: application/json" -d '{"customerId":"CUST-42","product":"MacBook Air","quantity":1}'
-curl -i -X POST https://<api-id>.execute-api.<region>.amazonaws.com/dev/orders -H "Content-Type: application/json" -d '{"customerId":"CUST-42","product":"","quantity":0}'
+curl -i https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev/orders/ORD-001
+curl -i https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev/orders/ORD-999
+curl -i "https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev/orders?customerId=CUST-42"
+curl -i "https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev/orders?customerId=CUST-100"
+curl -i -X POST https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev/orders -H "Content-Type: application/json" -d '{"customerId":"CUST-42","product":"MacBook Air","quantity":1}'
+curl -i -X POST https://<api-id>.execute-api.<region>.amazonaws.com/Alpha_dev/orders -H "Content-Type: application/json" -d '{"customerId":"CUST-42","product":"","quantity":0}'
 ```
 
 Or run everything at once: `./examples/curl-examples.sh <invoke URL>`.
@@ -429,7 +429,7 @@ Saved examples: [`events/proxy-get-order.json`](events/proxy-get-order.json), [`
 | Query parameters | `queryStringParameters` (+ `multiValueQueryStringParameters`) | `{"customerId": "CUST-42"}` |
 | Headers | `headers` (+ `multiValueHeaders`) | `{"Content-Type": "application/json", ...}` |
 | Request body | `body`, **as a string** (base64 if `isBase64Encoded` is true) | `"{\"customerId\":\"CUST-42\",...}"` |
-| Stage, request id, caller IP... | `requestContext` | `"stage": "dev"` |
+| Stage, request id, caller IP... | `requestContext` | `"stage": "Alpha_dev"` |
 
 Note that the body is a JSON *string inside* the JSON event, so the handler has to parse it itself. Absent parameters are `null`, not empty maps.
 
@@ -536,47 +536,48 @@ Note on idempotency: `DELETE` is idempotent in HTTP terms because the *state* af
 
 ```mermaid
 flowchart TB
-    Client(["Client<br/>curl / Postman"])
+    Client["Client<br/>(curl / Postman)"]
 
-    subgraph AWS["AWS (managed, depends on AWS)"]
-        direction TB
-        GW["Amazon API Gateway (REST API)<br/>stage: dev"]
-        subgraph A["Architecture A: non-proxy"]
-            LA["λ orders-create-order<br/>λ orders-get-order<br/>λ orders-find-orders<br/>λ orders-delete-order"]
-        end
-        subgraph B["Architecture B: proxy"]
-            LB["λ orders-api-proxy"]
-        end
-        CW[("CloudWatch Logs")]
+    subgraph AWS["AWS"]
+        GW["API Gateway<br/>stage: Alpha_dev"]
+        LA["Architecture A<br/>4 Lambdas, one per operation<br/>create · get · find · delete"]
+        LB["Architecture B<br/>1 Lambda: orders-api-proxy"]
     end
 
-    subgraph JAR["orders-api-1.0.0.jar (same JAR in every function)"]
-        direction TB
-        subgraph AWSJAVA["Java that depends on AWS libraries"]
-            H["lambda.proxy.OrdersApiHandler<br/>HTTP adapter: routing, params,<br/>status codes, headers, JSON"]
-        end
-        subgraph PLAIN["Ordinary Java (no AWS, no HTTP)"]
-            D["lambda.direct.DirectOrderFunctions<br/>Lambda entry points, POJO in/out"]
-            S["application.OrderService<br/>business rules + validation"]
-            R["persistence.InMemoryOrderRepository"]
-            M["domain.Order / CreateOrderRequest"]
-        end
+    subgraph JAVA["Our Java code (orders-api-1.0.0.jar)"]
+        D["DirectOrderFunctions<br/>entry points for A"]
+        H["OrdersApiHandler<br/>HTTP adapter for B"]
+        S["OrderService<br/>business logic"]
+        R["InMemoryOrderRepository<br/>orders kept in memory"]
     end
 
-    Client -->|"HTTPS request"| GW
-    GW -->|"A: mapped JSON<br/>(VTL templates)"| LA
-    GW -->|"B: full proxy event"| LB
-    LA -->|invokes| D
-    LB -->|invokes| H
+    Client -->|"1. HTTP request"| GW
+    GW -->|"2a. small JSON<br/>(mapping templates)"| LA
+    GW -->|"2b. full HTTP event"| LB
+    LA --> D
+    LB --> H
     D --> S
     H --> S
     S --> R
-    S -.uses.-> M
-    H -.logs.-> CW
-    GW -->|"HTTPS response"| Client
+    GW -.->|"3. HTTP response"| Client
+
+    classDef aws fill:#FFE8CC,stroke:#FF9900,color:#000
+    classDef awsJava fill:#FFF5B8,stroke:#C9A800,color:#000
+    classDef plain fill:#D9F2DC,stroke:#2E8B3A,color:#000
+    class GW,LA,LB aws
+    class H awsJava
+    class D,S,R plain
 ```
 
-Arrows show the direction of calls; responses travel back along the same path. Everything in the "Ordinary Java" box compiles and runs without AWS; only `OrdersApiHandler` imports AWS classes (`aws-lambda-java-core` / `-events`).
+**How to read it**
+
+| Color | Meaning |
+|---|---|
+| Orange | AWS services, configured in the console (API Gateway and the Lambda functions) |
+| Yellow | Java that depends on AWS libraries: only `OrdersApiHandler`, because it reads the API Gateway event |
+| Green | Ordinary Java with no AWS or HTTP code. It compiles, runs and is tested without AWS |
+
+Solid arrows show who calls whom; the dotted arrow is the response going back to the client. Both architectures share the same `OrderService`: the only difference is who does the HTTP work (API Gateway in A, `OrdersApiHandler` in B).
 
 ## 11. AI-assisted development and critique of the agent
 
@@ -631,7 +632,7 @@ I used **Claude (Claude Code)** as an engineering collaborator. The prompt was i
 ./deploy/deploy.sh all
 ```
 
-It creates the five Lambda functions (Java 17, role `LabRole` by default, override with `LAMBDA_ROLE_ARN`), imports both OpenAPI files as two REST APIs, grants API Gateway permission to invoke the functions and deploys the `dev` stage. It prints both invoke URLs.
+It creates the five Lambda functions (Java 17, role `LabRole` by default, override with `LAMBDA_ROLE_ARN`), imports both OpenAPI files as two REST APIs, grants API Gateway permission to invoke the functions and deploys the stage (`STAGE`, default `Alpha_dev`). It prints both invoke URLs.
 
 ### Option 2: console, by hand
 
@@ -642,7 +643,7 @@ It creates the five Lambda functions (Java 17, role `LabRole` by default, overri
 4. *Configuration* → *General* → memory 512 MB, timeout 15 s.
 5. *Test* with the matching file from `events/`.
 
-**API Gateway, quickest:** *Create API* → *REST API* → *Import* → paste the OpenAPI file after replacing `REGION_PLACEHOLDER` and `ACCOUNT_ID_PLACEHOLDER`. Then for each function run `aws lambda add-permission ...` (see the script) or open each method's *Integration request* → *Edit* → *Save*, which makes the console offer to add the permission. *Deploy API* → new stage `dev`.
+**API Gateway, quickest:** *Create API* → *REST API* → *Import* → paste the OpenAPI file after replacing `REGION_PLACEHOLDER` and `ACCOUNT_ID_PLACEHOLDER`. Then for each function run `aws lambda add-permission ...` (see the script) or open each method's *Integration request* → *Edit* → *Save*, which makes the console offer to add the permission. *Deploy API* → new stage `Alpha_dev`.
 
 **API Gateway, step by step (Architecture A):**
 1. *Create resource* `/orders`, then child `/{id}`.

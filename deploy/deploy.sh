@@ -10,7 +10,7 @@
 # Environment variables:
 #   AWS_REGION       default: the CLI's configured region, or us-east-1
 #   LAMBDA_ROLE_ARN  default: arn:aws:iam::<account>:role/LabRole (AWS Academy Learner Lab)
-#   STAGE            default: dev
+#   STAGE            default: Alpha_dev
 #
 # Each api-a / api-b run creates a NEW REST API. Delete old ones in the console if needed.
 set -euo pipefail
@@ -20,7 +20,7 @@ REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || true)}"
 REGION="${REGION:-us-east-1}"
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 ROLE_ARN="${LAMBDA_ROLE_ARN:-arn:aws:iam::${ACCOUNT_ID}:role/LabRole}"
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-Alpha_dev}"
 JAR="target/orders-api-1.0.0.jar"
 DIRECT="edu.escuelaing.orders.lambda.direct.DirectOrderFunctions"
 PROXY="edu.escuelaing.orders.lambda.proxy.OrdersApiHandler"

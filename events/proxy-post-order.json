@@ -19,8 +19,8 @@
   "requestContext": {
     "resourcePath": "/orders",
     "httpMethod": "POST",
-    "path": "/dev/orders",
-    "stage": "dev",
+    "path": "/Alpha_dev/orders",
+    "stage": "Alpha_dev",
     "requestId": "d1b2c3d4-0000-4000-8000-000000000003",
     "apiId": "abc123defg"
   },
