@@ -19,9 +19,10 @@ The same business logic (`OrderService`) is used by both. It never sees HTTP, AP
 8. [Comparing the two architectures](#8-comparing-the-two-architectures)
 9. [Final challenge: DELETE /orders/{id}](#9-final-challenge-delete-ordersid)
 10. [Final architecture diagram](#10-final-architecture-diagram)
-11. [AI-assisted development and critique of the agent](#11-ai-assisted-development-and-critique-of-the-agent)
+11. [Working with an AI assistant](#11-working-with-an-ai-assistant)
 12. [How to deploy](#12-how-to-deploy)
-13. [Demo video checklist](#13-demo-video-checklist)
+13. [Screenshots](#13-screenshots)
+14. [Demo video](#14-demo-video)
 
 ---
 
@@ -51,7 +52,9 @@ orders-api/
 │   ├── architecture-a-mapping-openapi.yaml   API Gateway config, non-proxy + mapping templates
 │   └── architecture-b-proxy-openapi.yaml     API Gateway config, proxy integration
 ├── deploy/deploy.sh                          AWS CLI script: Lambdas + both APIs
-├── docs/delete-prediction.md                 Prediction written before implementing DELETE
+├── docs/
+│   ├── delete-prediction.md                  Prediction written before implementing DELETE
+│   └── evidence/                             Screenshots of the Lambdas and API Gateway
 ├── events/                                   JSON used to invoke the Lambdas by hand
 │   ├── direct-*.json                         inputs for the direct (Part II / Architecture A) functions
 │   └── proxy-*.json                          API Gateway proxy events (Architecture B)
@@ -68,7 +71,7 @@ orders-api/
     └── test/java/...          JUnit 5 tests for every layer
 ```
 
-The dependency direction is always inwards: `lambda.*` → `application` → `domain`. Nothing in `domain`, `application` or `persistence` imports an AWS, HTTP or Jackson class.
+The dependency direction is always inwards: `lambda.*` -> `application` -> `domain`. Nothing in `domain`, `application` or `persistence` imports an AWS, HTTP or Jackson class.
 
 ## 3. API contract
 
@@ -233,7 +236,7 @@ Runtime: **Java 17**, memory 512 MB, timeout 15 s, code: `target/orders-api-1.0.
 
 ### Invoking it by hand
 
-In the Lambda console: *Test* tab → paste the JSON → *Test*. With the CLI:
+In the Lambda console: *Test* tab -> paste the JSON -> *Test*. With the CLI:
 
 ```bash
 aws lambda invoke --function-name orders-create-order --cli-binary-format raw-in-base64-out --payload file://events/direct-create-order.json out.json
@@ -247,16 +250,16 @@ aws lambda invoke --function-name orders-create-order --cli-binary-format raw-in
 | `{"customerId": "CUST-42", "product": "Monitor", "quantity": "2", "color": "black"}` | Created normally: `"2"` is converted to the number 2 and the unknown field `color` is ignored |
 | `{"id": "ORD-999"}` (to `orders-get-order`) | Function error: `"errorMessage":"ORDER_NOT_FOUND: Order ORD-999 does not exist"` |
 
-> **Evidence:** add screenshots of your own invocations to `docs/evidence/` (the second row is a nice way to *see* that in-memory state survives only while the environment is warm).
+Screenshots of these invocations are in [section 13](#13-screenshots). In screenshot 01 the new order got `ORD-006` instead of `ORD-004` because the function was still warm after earlier tests. That shows the memory is kept only while the environment is alive.
 
 ### Investigation: how does Lambda turn JSON into Java objects and back?
 
-What we found (first asked an LLM, then checked against the deployed function):
+What I found, after reading about it and checking it against the deployed function (see screenshots 01 and 02):
 
 1. **The handler string tells the runtime what to call.** `Class::method` makes the runtime load the class from our JAR, create **one instance** with the public no-arg constructor (on the cold start, not per request) and find the method by name. The method can have the form `(Input)`, `(Input, Context)`, or implement `RequestHandler<I, O>` / `RequestStreamHandler`; none of that is required.
 2. **Input.** The runtime looks at the declared parameter type. If it is `InputStream` it passes the raw bytes; if it is `String`, `Integer`, `Map`, `List` it converts directly; if it is a POJO, it uses its built-in serializer (`aws-lambda-java-serialization`, an internal, shaded **Jackson**) to map JSON fields to properties by name, using the no-arg constructor and setters. So `{"id": "ORD-001"}` becomes `new OrderIdInput()` + `setId("ORD-001")`.
-3. **Lenient mapping.** Unknown JSON fields are ignored (`color` above), missing fields stay `null` (that is why `quantity` is an `Integer` and not an `int`: a missing quantity is `null` and is rejected, instead of silently becoming `0`), and simple coercions like `"2"` → `2` work. JSON that cannot be mapped (e.g. `"quantity": "abc"`) fails **before our code runs**, with an error like `An error occurred during JSON parsing`.
-4. **Output.** The return value goes through the same serializer: public getters become JSON fields (`getCustomerId()` → `"customerId"`). A `List<Order>` becomes a JSON array. A `void` method returns `null`.
+3. **Lenient mapping.** Unknown JSON fields are ignored (`color` above), missing fields stay `null` (that is why `quantity` is an `Integer` and not an `int`: a missing quantity is `null` and is rejected, instead of silently becoming `0`), and simple coercions like `"2"` -> `2` work. JSON that cannot be mapped (e.g. `"quantity": "abc"`) fails **before our code runs**, with an error like `An error occurred during JSON parsing`.
+4. **Output.** The return value goes through the same serializer: public getters become JSON fields (`getCustomerId()` -> `"customerId"`). A `List<Order>` becomes a JSON array. A `void` method returns `null`.
 5. **Errors.** An uncaught exception becomes `{"errorMessage": e.getMessage(), "errorType": <class name>, "stackTrace": [...]}` and the invocation is marked as failed (the CLI shows `"FunctionError": "Unhandled"`). This is what Architecture A uses to pick HTTP status codes.
 6. **Special types.** Classes from `aws-lambda-java-events` (such as `APIGatewayProxyRequestEvent`) are recognized by the runtime and deserialized with their own rules. That is what Architecture B relies on.
 
@@ -281,11 +284,11 @@ Config: [`apigateway/architecture-a-mapping-openapi.yaml`](apigateway/architectu
 
 ```mermaid
 flowchart LR
-    C[Client] -->|HTTP| G["API Gateway (REST API)<br/>routing · request templates<br/>regex on errorMessage · response templates"]
-    G -->|"{&quot;customerId&quot;,...}"| L1["λ orders-create-order<br/>::createOrder"]
-    G -->|"{&quot;id&quot;: &quot;ORD-42&quot;}"| L2["λ orders-get-order<br/>::getOrder"]
-    G -->|"{&quot;customerId&quot;: &quot;CUST-42&quot;}"| L3["λ orders-find-orders<br/>::findOrdersByCustomer"]
-    G -->|"{&quot;id&quot;: &quot;ORD-42&quot;}"| L4["λ orders-delete-order<br/>::deleteOrder"]
+    C[Client] -->|HTTP| G["API Gateway (REST API)<br/>routing, request templates,<br/>regex on errorMessage, response templates"]
+    G -->|"{&quot;customerId&quot;,...}"| L1["Lambda orders-create-order<br/>::createOrder"]
+    G -->|"{&quot;id&quot;: &quot;ORD-42&quot;}"| L2["Lambda orders-get-order<br/>::getOrder"]
+    G -->|"{&quot;customerId&quot;: &quot;CUST-42&quot;}"| L3["Lambda orders-find-orders<br/>::findOrdersByCustomer"]
+    G -->|"{&quot;id&quot;: &quot;ORD-42&quot;}"| L4["Lambda orders-delete-order<br/>::deleteOrder"]
     L1 & L2 & L3 & L4 --> S["OrderService (plain Java)"]
 ```
 
@@ -317,12 +320,12 @@ The Java code never sees a URL, a header or a query string. `DirectOrderFunction
 
 A non-proxy Lambda cannot return a status code. It either returns a value (success) or throws (error). API Gateway decides the status:
 
-- **Success** → the `default` integration response: `200` for GETs, `201` for POST. For POST the template also sets the `Location` header:
+- **Success** -> the `default` integration response: `200` for GETs, `201` for POST. For POST the template also sets the `Location` header:
   ```velocity
   #set($context.responseOverride.header.Location = "/orders/$input.path('$.id')")
   $input.json('$')
   ```
-- **Errors** → API Gateway matches a regex against the Lambda's `errorMessage`. That is why `DirectOrderFunctions` rethrows domain exceptions as `DirectFunctionException("ORDER_NOT_FOUND", ...)`, whose message is `ORDER_NOT_FOUND: Order ORD-42 does not exist`.
+- **Errors** -> API Gateway matches a regex against the Lambda's `errorMessage`. That is why `DirectOrderFunctions` rethrows domain exceptions as `DirectFunctionException("ORDER_NOT_FOUND", ...)`, whose message is `ORDER_NOT_FOUND: Order ORD-42 does not exist`.
 
 | Selection pattern (regex on `errorMessage`) | Status | Body built by the template |
 |---|---|---|
@@ -377,7 +380,7 @@ Expected results:
 
 | Responsibility | Where |
 |---|---|
-| Routing (`GET /orders/{id}` → `orders-get-order`) | API Gateway resources + methods |
+| Routing (`GET /orders/{id}` -> `orders-get-order`) | API Gateway resources + methods |
 | Extracting path parameters | request template (`$input.params().path`) |
 | Extracting query parameters | request template (`$input.params().querystring`) |
 | Transforming the request into the Lambda's input JSON | request templates |
@@ -444,7 +447,7 @@ The handler must answer with this shape (API Gateway turns it into the real HTTP
 ```mermaid
 flowchart LR
     C[Client] -->|HTTP| G["API Gateway<br/>routing only"]
-    G -->|"APIGatewayProxyRequestEvent<br/>(method, resource, params, headers, body)"| H["λ orders-api-proxy<br/>OrdersApiHandler (HTTP adapter)"]
+    G -->|"APIGatewayProxyRequestEvent<br/>(method, resource, params, headers, body)"| H["Lambda orders-api-proxy<br/>OrdersApiHandler (HTTP adapter)"]
     H -->|"createOrder(CreateOrderRequest)<br/>getOrder(id)<br/>getOrdersByCustomer(customerId)"| S["OrderService (plain Java)"]
     S -->|"Order / List&lt;Order&gt; / exception"| H
     H -->|"statusCode + headers + JSON body"| G
@@ -499,11 +502,11 @@ OrderService
 | Which required more API Gateway configuration? | **A, by far.** About 250 lines of OpenAPI with request templates, four regexes per method and repeated error templates. | About 60 lines: three routes, all `aws_proxy` to the same function. |
 | Which required more Java infrastructure code? | Little: `DirectOrderFunctions` (~20 real lines) and two tiny input DTOs. | **B.** `OrdersApiHandler` (~110 lines) with routing, parsing, error translation and serialization. |
 | Which was easier to test locally? | The Java side is trivial to test, but the HTTP behavior (status codes, templates, regexes) **cannot** be tested without deploying. | **B.** Every status code and header is covered by JUnit (`OrdersApiHandlerTest`), and the saved real events can be replayed. |
-| Where are HTTP status codes defined? | In API Gateway: `default` integration responses (200/201) and selection-pattern regexes (400/404/500). | In Java, in `OrdersApiHandler` (`json(201, ...)`, `catch (OrderNotFoundException e) → 404`). |
-| What happens at 30 operations? | 30 functions (or 30 integrations) × (request template + 3–4 regexes + error templates). Lots of copy-paste in YAML, many deploy-only bugs. Cold starts multiply (each function warms up separately). | Still one function and a 30-case routing table; error translation is written once. The handler grows and would need to be split (one small class per resource, or a tiny router library). Deploying one function means redeploying all routes. |
+| Where are HTTP status codes defined? | In API Gateway: `default` integration responses (200/201) and selection-pattern regexes (400/404/500). | In Java, in `OrdersApiHandler` (`json(201, ...)`, `catch (OrderNotFoundException e) -> 404`). |
+| What happens at 30 operations? | 30 functions (or 30 integrations), each with a request template, 3 or 4 regexes and error templates. Lots of copy-paste in YAML, many deploy-only bugs. Cold starts multiply (each function warms up separately). | Still one function and a 30-case routing table; error translation is written once. The handler grows and would need to be split (one small class per resource, or a tiny router library). Deploying one function means redeploying all routes. |
 | Which makes the business logic cleaner? | **Both are equally clean**: `OrderService` is identical. A even keeps the Lambda entry points free of AWS imports. | Same `OrderService`. The AWS-specific code is confined to one adapter class. |
-| Which is easier for another developer to understand? | Harder. The behavior is split between Java and VTL/regex in YAML, connected by a string convention (`"CODE: message"`). | **Easier.** One request → one Java method you can read top to bottom, step through in a debugger, and test. |
-| Which would I choose for a larger system? | For very simple pass-through endpoints, or when the gateway must integrate directly with AWS services (no Lambda at all, e.g. API Gateway → DynamoDB/SQS). | **B**, explained below. |
+| Which is easier for another developer to understand? | Harder. The behavior is split between Java and VTL/regex in YAML, connected by a string convention (`"CODE: message"`). | **Easier.** One request -> one Java method you can read top to bottom, step through in a debugger, and test. |
+| Which would I choose for a larger system? | For very simple pass-through endpoints, or when the gateway must integrate directly with AWS services (no Lambda at all, e.g. API Gateway -> DynamoDB/SQS). | **B**, explained below. |
 
 **Which would I choose and why.** For a larger system I would choose **Architecture B** (proxy integration with a thin adapter), because:
 
@@ -524,7 +527,7 @@ What changed:
 |---|---|
 | `OrderRepository` / `InMemoryOrderRepository` | `boolean deleteById(String id)` |
 | `OrderService` | `void deleteOrder(String id)`: throws `OrderNotFoundException` if nothing was deleted |
-| Architecture A | new function `orders-delete-order` → `DirectOrderFunctions::deleteOrder` (returns `void`); new `DELETE /orders/{id}` method with a request template, `default` → **204** with an empty template, and the same 404/400/500 regexes |
+| Architecture A | new function `orders-delete-order` -> `DirectOrderFunctions::deleteOrder` (returns `void`); new `DELETE /orders/{id}` method with a request template, `default` -> **204** with an empty template, and the same 404/400/500 regexes |
 | Architecture B | one `case "DELETE /orders/{id}"` in `OrdersApiHandler` returning 204; one new method in the OpenAPI file pointing to the **existing** function |
 | Tests | 7 new tests (service, direct function, adapter, saved `events/proxy-delete-order.json`) |
 
@@ -542,10 +545,10 @@ flowchart TB
         direction TB
         GW["API Gateway (REST API)<br/>stage: Alpha_dev"]
         subgraph A["Architecture A: non-proxy"]
-            LA["λ orders-create-order<br/>λ orders-get-order<br/>λ orders-find-orders<br/>λ orders-delete-order"]
+            LA["Lambda orders-create-order<br/>Lambda orders-get-order<br/>Lambda orders-find-orders<br/>Lambda orders-delete-order"]
         end
         subgraph B["Architecture B: proxy"]
-            LB["λ orders-api-proxy"]
+            LB["Lambda orders-api-proxy"]
         end
         CW[("CloudWatch Logs")]
     end
@@ -602,46 +605,44 @@ flowchart TB
 
 The arrows show who calls whom; the response goes back the same way. Both architectures use the same `OrderService`. The only difference is who does the HTTP part: API Gateway in A, `OrdersApiHandler` in B.
 
-## 11. AI-assisted development and critique of the agent
+## 11. Working with an AI assistant
 
-I used **Claude (Claude Code)** as an engineering collaborator. The prompt was in the spirit of the one suggested by the workshop: describe the API and the constraint "keep the application logic independent from AWS", and ask for the architecture, the files and where HTTP responsibilities would live *before* any code. I then reviewed each decision.
+I used Claude Code as a coding assistant. Before writing code I asked it to explain the architecture first: which classes it would create, which files would change and where the HTTP logic would go. Then I went through its decisions one by one. These are the ones that mattered most.
 
-> Before submitting, adapt this section with your own opinion. The workshop evaluates *your* judgment of the agent, not the agent's opinion of itself.
+### Decision 1: one Lambda per operation in A, one Lambda for everything in B
 
-### Decision 1: one Lambda per operation in A, one Lambda for the whole API in B
-
-- **Decision made by the agent:** In Architecture A, deploy each operation as its own function (`orders-get-order`, ...), each pointing to a different method of the same class. In Architecture B, a single function for all routes.
-- **Why it proposed this:** Non-proxy integrations map one method to one integration with its own templates, and the workshop's Part II asks to deploy "one Java operation". For the proxy, one function with a router is the common pattern.
-- **Do I agree?** Partially. It is the natural fit for each style, and the agent did point out the consequence: with in-memory storage, **separate functions do not share data**, so an order created by `orders-create-order` is invisible to `orders-get-order`. That makes the A demo confusing (POST works, GET of the new order returns 404), and it is easy to mistake for a bug.
-- **Alternative:** A single "dispatcher" Lambda for A where the mapping template adds an `"action"` field. That shares memory but turns the Lambda into a router driven by gateway-supplied strings, which mixes the two architectures.
-- **What I implemented and why:** Kept one-function-per-operation in A, and documented the side effect (README section 6) and demonstrated it using the seed data. The limitation is caused by in-memory storage, not by the architecture; with DynamoDB it disappears, so hiding it with a dispatcher would teach the wrong lesson.
+- **What it proposed:** In Architecture A, each operation is its own function (`orders-get-order`, ...), each one pointing to a different method of the same class. In Architecture B, a single function for all the routes.
+- **Why I think it proposed it:** With the non-proxy integration each method has its own templates, so one function per method fits naturally. For the proxy, one function with a small router is the usual pattern.
+- **Do I agree?** Partly. It fits each style, but it has a side effect: since the orders are kept in memory, **separate functions don't share data**. An order created by `orders-create-order` doesn't exist for `orders-get-order`, so in A the POST works but the GET of that new order gives 404. It looks like a bug if you don't know why.
+- **Other option:** One "dispatcher" Lambda for A, where the mapping template adds an `"action"` field. Memory would be shared, but the Lambda would become a router driven by strings from the gateway, and the two architectures would get mixed up.
+- **What I did:** I kept one function per operation in A and explained the side effect in section 6. The problem comes from keeping data in memory, not from the architecture. With a real database like DynamoDB it goes away, so hiding it with a dispatcher didn't make sense.
 
 ### Decision 2: where validation and error codes live
 
-- **Decision considered by the agent:** A base `OrderException` carrying an error code (`"ORDER_NOT_FOUND"`, `"INVALID_REQUEST"`), so that both adapters could just read `e.getCode()` instead of each mapping exception types.
-- **Why it proposed this:** It removes duplicated mapping code from the two adapters, and it is a very common pattern (it is one step away from Spring's `ResponseStatusException`, which also carries the HTTP status).
-- **Do I agree?** No. The codes are part of the *API contract*, not of the business rules; once they are in `application`, the next natural step is to add the HTTP status too, which is exactly what the workshop asks to avoid. The agent ended up choosing the alternative itself before writing the code.
-- **Alternative:** Plain domain exceptions (`OrderNotFoundException`, `InvalidOrderException`) and a translation step in each adapter.
-- **What I implemented and why:** Plain domain exceptions without codes or statuses. `OrdersApiHandler` maps them to 400/404/500; `DirectOrderFunctions` maps them to the `CODE: message` prefix that the API Gateway regexes read. Validation stays in `OrderService` (business rules), and only *syntax* problems (malformed JSON) are detected in the adapter. The cost is two small mapping blocks instead of one, which is worth the clean dependency direction.
+- **What it considered:** A base `OrderException` with an error code (`"ORDER_NOT_FOUND"`, `"INVALID_REQUEST"`), so both adapters could just read `e.getCode()`.
+- **Why I think it considered it:** It avoids repeating the mapping in two places, and it's a very common pattern (Spring's `ResponseStatusException` even carries the HTTP status).
+- **Do I agree?** No. The codes belong to the API contract, not to the business rules. Once they're inside `application`, the next step is adding the HTTP status there too, and that's exactly what I wanted to avoid. In the end the assistant went with the other option before writing the code.
+- **Other option:** Plain domain exceptions (`OrderNotFoundException`, `InvalidOrderException`) and each adapter translates them.
+- **What I did:** Plain domain exceptions with no codes or statuses. `OrdersApiHandler` turns them into 400, 404 or 500, and `DirectOrderFunctions` turns them into the `CODE: message` text that the API Gateway regexes read. Validation stays in `OrderService`, and only broken JSON is caught in the adapter. It means two small mapping blocks instead of one, but the dependencies stay clean.
 
-### Decision 3: use AWS event classes (`APIGatewayProxyRequestEvent`) vs. a `Map` or our own types
+### Decision 3: using the AWS event classes (`APIGatewayProxyRequestEvent`)
 
-- **Decision made by the agent:** Implement `RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent>` from `aws-lambda-java-events`.
-- **Why it proposed this:** It is the documented, typed way; the runtime knows how to deserialize it, and the IDE autocompletes the fields.
-- **Do I agree?** Yes, *for the adapter only*. The alternatives were `Map<String, Object>` (untyped, lots of casting) or `RequestStreamHandler` with our own DTO (more control, more code). Since the adapter is supposed to be the AWS-aware part, depending on AWS types there is fine.
-- **What I implemented and why:** The event classes in `lambda.proxy` only. The tests build events with the fluent `withX()` methods and also load the saved real events, so the handler is fully testable without AWS.
+- **What it proposed:** Implement `RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent>` from `aws-lambda-java-events`.
+- **Why I think it proposed it:** It's the documented way, it's typed, the runtime already knows how to read it, and the IDE autocompletes the fields.
+- **Do I agree?** Yes, but only in the adapter. The other options were a `Map<String, Object>` (no types, lots of casting) or `RequestStreamHandler` with my own classes (more control, more code). The adapter is supposed to be the part that knows about AWS, so using AWS classes there is fine.
+- **What I did:** The event classes are only used in `lambda.proxy`. The tests build the events with the `withX()` methods and also load the saved real events, so the handler can be tested without AWS.
 
-### Decision 4: Velocity regex conventions for errors in Architecture A
+### Decision 4: error codes inside the message for Architecture A
 
-- **Decision made by the agent:** Encode the error code at the start of the exception message (`ORDER_NOT_FOUND: ...`) and use regex selection patterns, plus a catch-all regex for 500.
-- **Why it proposed this:** API Gateway only exposes `errorMessage` to selection patterns; there is no other channel for a non-proxy Lambda to signal "which error".
-- **Do I agree?** Yes, it is the standard technique, and the catch-all 500 regex is something many tutorials forget. But it is fragile, so I asked for a unit test (`DirectOrderFunctionsTest`) that pins the exact message format, so a refactor in Java cannot break the gateway contract without a failing test.
-- **Alternative:** Throw the whole error JSON as the message and use `$input.path('$.errorMessage')` directly as the body. Fewer template lines, but JSON inside an exception message is uglier and easier to break.
+- **What it proposed:** Put the error code at the start of the exception message (`ORDER_NOT_FOUND: ...`) and use regex selection patterns in API Gateway, plus a last regex that catches everything else as 500.
+- **Why I think it proposed it:** API Gateway only lets the regexes look at `errorMessage`. A non-proxy Lambda has no other way to say which error happened.
+- **Do I agree?** Yes, it's the standard way, and the catch-all regex for 500 is something many tutorials forget. But it's fragile, so I added a test (`DirectOrderFunctionsTest`) that checks the exact message format. That way a change in Java can't break the gateway without a test failing.
+- **Other option:** Throw the whole error JSON as the message and use `$input.path('$.errorMessage')` as the body. Fewer template lines, but JSON inside an exception message is messy and easy to break.
 
-### Decision 5: in-memory id generation
+### Decision 5: generating ids in memory
 
-- **Decision made by the agent:** Sequential ids (`ORD-004`, `ORD-005`) via an `AtomicInteger`.
-- **Do I agree?** For a demo, yes (readable, predictable in tests because it is injected). In production it is wrong: two concurrent Lambda environments would both generate `ORD-004`. With a real database I would use UUIDs or a database-generated key. This is documented in `SequentialOrderIdGenerator`.
+- **What it proposed:** Sequential ids (`ORD-004`, `ORD-005`) with an `AtomicInteger`.
+- **Do I agree?** For a demo, yes: they're easy to read, and tests can control them because the generator is injected. In production it's wrong, because two Lambda environments running at the same time would both create `ORD-004`. With a real database I would use UUIDs or let the database generate the key.
 
 ## 12. How to deploy
 
@@ -660,33 +661,56 @@ It creates the five Lambda functions (Java 17, role `LabRole` by default, overri
 ### Option 2: console, by hand
 
 **Lambda** (repeat per function in the tables of sections 5 and 7):
-1. Lambda → *Create function* → *Author from scratch*, runtime **Java 17**, execution role: existing role (`LabRole` in the Learner Lab).
-2. *Code* → *Upload from* → *.zip or .jar file* → `target/orders-api-1.0.0.jar`.
-3. *Runtime settings* → *Edit* → *Handler*: e.g. `edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::getOrder`.
-4. *Configuration* → *General* → memory 512 MB, timeout 15 s.
+1. Lambda -> *Create function* -> *Author from scratch*, runtime **Java 17**, execution role: existing role (`LabRole` in the Learner Lab).
+2. *Code* -> *Upload from* -> *.zip or .jar file* -> `target/orders-api-1.0.0.jar`.
+3. *Runtime settings* -> *Edit* -> *Handler*: e.g. `edu.escuelaing.orders.lambda.direct.DirectOrderFunctions::getOrder`.
+4. *Configuration* -> *General* -> memory 512 MB, timeout 15 s.
 5. *Test* with the matching file from `events/`.
 
-**API Gateway, quickest:** *Create API* → *REST API* → *Import* → paste the OpenAPI file after replacing `REGION_PLACEHOLDER` and `ACCOUNT_ID_PLACEHOLDER`. Then for each function run `aws lambda add-permission ...` (see the script) or open each method's *Integration request* → *Edit* → *Save*, which makes the console offer to add the permission. *Deploy API* → new stage `Alpha_dev`.
+**API Gateway, quickest:** *Create API* -> *REST API* -> *Import* -> paste the OpenAPI file after replacing `REGION_PLACEHOLDER` and `ACCOUNT_ID_PLACEHOLDER`. Then for each function run `aws lambda add-permission ...` (see the script) or open each method's *Integration request* -> *Edit* -> *Save*, which makes the console offer to add the permission. *Deploy API* -> new stage `Alpha_dev`.
 
 **API Gateway, step by step (Architecture A):**
 1. *Create resource* `/orders`, then child `/{id}`.
-2. `GET` on `/{id}` → integration type *Lambda function*, **Lambda proxy integration off**, function `orders-get-order`.
-3. *Integration request* → *Mapping templates* → content type `application/json` → template from section 6.
-4. *Method response* → add 404, 400, 500. *Integration response* → add one entry per row of the regex table in section 6, each with its template.
+2. `GET` on `/{id}` -> integration type *Lambda function*, **Lambda proxy integration off**, function `orders-get-order`.
+3. *Integration request* -> *Mapping templates* -> content type `application/json` -> template from section 6.
+4. *Method response* -> add 404, 400, 500. *Integration response* -> add one entry per row of the regex table in section 6, each with its template.
 5. Same for `GET /orders` (`orders-find-orders`), `POST /orders` (`orders-create-order`, default response 201 + `Location`), `DELETE /orders/{id}` (`orders-delete-order`, default response 204).
 6. *Deploy API*.
 
 **Architecture B:** create the same resources, and for every method choose *Lambda function* with **Lambda proxy integration on**, function `orders-api-proxy`. Nothing else. *Deploy API*.
 
-## 13. Demo video checklist
+## 13. Screenshots
 
-1. `mvn test` (all tests green).
-2. `mvn package` (show `target/orders-api-1.0.0.jar`).
-3. Lambda console: invoke `orders-create-order` with `events/direct-create-order.json` and `events/direct-create-order-2.json`.
-4. `curl` against the deployed API (`examples/curl-examples.sh`):
-   - successful `POST /orders` → 201 with `Location`
-   - successful `GET /orders/ORD-001` → 200
-   - `GET /orders/ORD-999` → 404
-   - `POST /orders` with `quantity: 0` → 400
-   - `DELETE /orders/ORD-002` → 204, then again → 404
-5. Show the architecture diagram (section 10).
+All screenshots are in [`docs/evidence/`](docs/evidence/).
+
+**01. `orders-create-order` invoked directly from the Lambda console.** The JSON input becomes a `CreateOrderRequest` and the returned `Order` comes back as JSON.
+
+![Create order Lambda, success](docs/evidence/01-lambda-create-order-ok.png)
+
+**02. `orders-create-order` with invalid data.** The function fails with `errorMessage: "INVALID_REQUEST: product is required; quantity must be greater than 0"`, plus `errorType` and `stackTrace`. In Architecture A, API Gateway turns this message into a 400.
+
+![Create order Lambda, invalid input](docs/evidence/02-lambda-create-order-invalid.png)
+
+**03. `orders-get-order` with `{"id": "ORD-001"}`.** It returns one of the sample orders. The `Init duration` line shows the cold start of the Java runtime.
+
+![Get order Lambda](docs/evidence/03-lambda-get-order-ok.png)
+
+**04. Architecture A imported in API Gateway (`orders-api-mapping`)**, and the permissions that let API Gateway call the four Lambdas, added from CloudShell.
+
+![Architecture A import and permissions](docs/evidence/04-api-a-import-and-permissions.png)
+
+**05. Architecture B (`orders-api-proxy`):** permission for API Gateway to call the proxy Lambda.
+
+![Architecture B permission](docs/evidence/05-api-b-proxy-permission.png)
+
+## 14. Demo video
+
+Video: [watch the demo](VIDEO_LINK)
+
+What it shows:
+
+1. `mvn test` with all tests passing.
+2. `mvn package` and the generated `target/orders-api-1.0.0.jar`.
+3. A Lambda invoked directly from the console.
+4. Calls to the deployed API with `curl`: a successful `POST` (201 with `Location`), a successful `GET` (200), a 404, a 400 and the `DELETE` extension (204 and then 404).
+5. The architecture diagram.

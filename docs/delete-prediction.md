@@ -1,6 +1,6 @@
 # DELETE /orders/{id}: prediction before implementing
 
-Written and committed **before** asking the AI assistant to implement the feature.
+I wrote and committed this **before** implementing the feature, to compare it later with what I actually ended up doing.
 
 Expected behavior:
 
@@ -25,7 +25,7 @@ Expected behavior:
 
 **Does API Gateway configuration need to change?**
 Yes in both, but very differently:
-- A: new `DELETE` method on `/orders/{id}` with a request template (`{"id": ...}`), a default integration response mapped to **204** with an empty body, the `ORDER_NOT_FOUND` regex → 404, the 400 and the catch-all 500 regexes, plus permission for API Gateway to invoke the new function.
+- A: new `DELETE` method on `/orders/{id}` with a request template (`{"id": ...}`), a default integration response mapped to **204** with an empty body, the `ORDER_NOT_FOUND` regex -> 404, the 400 and the catch-all 500 regexes, plus permission for API Gateway to invoke the new function.
 - B: just a new `DELETE` method on `/orders/{id}` with proxy integration to the existing function. No templates.
 
 **Where should the deletion logic reside?**
@@ -37,21 +37,21 @@ In `OrderService.deleteOrder` (the rule "you cannot delete what does not exist" 
 
 **Which tests should be added?**
 - `OrderServiceTest`: deleting an existing order removes it (a later `getOrder` throws not found, it disappears from the customer search); deleting a missing order throws `OrderNotFoundException`; blank id is invalid.
-- `OrdersApiHandlerTest`: `DELETE` of an existing order → 204 with empty body; `DELETE` of a missing order → 404 with the error JSON; deleting twice → 204 then 404.
-- `DirectOrderFunctionsTest`: missing order → `ORDER_NOT_FOUND: ...` message.
+- `OrdersApiHandlerTest`: `DELETE` of an existing order -> 204 with empty body; `DELETE` of a missing order -> 404 with the error JSON; deleting twice -> 204 then 404.
+- `DirectOrderFunctionsTest`: missing order -> `ORDER_NOT_FOUND: ...` message.
 
-## Comparison with the agent's proposal
+## Comparison with what was implemented
 
-The assistant's proposal matched the prediction on the main points: same classes, same place for the logic (`OrderService`), same split of the 204/404 decision, a new function only in Architecture A, and a gateway change in both.
+The implementation (done with help from the coding assistant) matched the prediction on the main points: same classes, same place for the logic (`OrderService`), same split of the 204/404 decision, a new function only in Architecture A, and a gateway change in both.
 
-| Topic | Prediction | Agent's proposal / final implementation | Comment |
+| Topic | Prediction | What was implemented | Comment |
 |---|---|---|---|
 | Repository method | `boolean deleteById(String id)` | Same | Returning `boolean` avoids a separate `findById` + `delete` (two steps that could race). |
-| Service signature | `void deleteOrder(String id)` throwing not found | Same | An alternative was returning the deleted `Order` (or `boolean`). The agent kept `void` + exception to be consistent with `getOrder`, so both adapters reuse their existing 404 mapping. |
-| Architecture A: Lambda return type | `void` | `void` | The runtime returns `null`. **Not predicted:** the agent pointed out that the `default` integration response needs an explicit (empty) template; otherwise the default passthrough would send the text `null` as the body of the 204. |
+| Service signature | `void deleteOrder(String id)` throwing not found | Same | An alternative was returning the deleted `Order` (or `boolean`). I kept `void` + exception to be consistent with `getOrder`, so both adapters reuse their existing 404 mapping. |
+| Architecture A: Lambda return type | `void` | `void` | The runtime returns `null`. **Not predicted:** the `default` integration response needs an explicit (empty) template; otherwise the default passthrough would send the text `null` as the body of the 204. |
 | Architecture A: 404 | Regex `ORDER_NOT_FOUND: .*` | Same, plus the 400 and catch-all 500 regexes copied again | This copy-paste is the "30 operations" problem in small. |
 | Architecture B: 204 body | No body | `withStatusCode(204)` with no body and no `Content-Type` header | Not predicted in detail: a 204 must not have a body, so the JSON content-type header is also left out. |
 | Tests | service + adapter + direct | Same, plus the saved event `events/proxy-delete-order.json` run through the handler | The extra event keeps the documented examples honest. |
-| Idempotency | Not considered | The agent raised whether the second `DELETE` should be 204 (idempotent "it's gone") or 404 | We kept 404 because the workshop asks for it, and documented why it still respects HTTP idempotency (same server state). |
+| Idempotency | Not considered | The question came up whether the second `DELETE` should be 204 (idempotent "it's gone") or 404 | I kept 404 because that is the expected behavior, and documented why it still respects HTTP idempotency (same server state). |
 
 What surprised me: the amount of work was very different between the architectures. B was one `case` line plus one Java method; A needed a new function, a new permission and ~60 lines of YAML, even though the business logic was identical.
